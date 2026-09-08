@@ -55,6 +55,16 @@ PROTECTED_TOKENS = [
     "frida-pipe.h",
     "frida-core.h",
     "frida-core.vapi",
+    # static_library()/executable() targets that don't pass an explicit
+    # vala_header: still get one, meson just derives its name from the
+    # target name itself (e.g. static_library('frida-helper-backend', ...)
+    # -> frida-helper-backend.h). frida-helper-backend.h caused the same
+    # "file not found" failure as the explicit ones above; frida-netif.h
+    # and frida-tests.h follow the identical pattern so are protected
+    # pre-emptively.
+    "frida-helper-backend.h",
+    "frida-netif.h",
+    "frida-tests.h",
 ]
 # Longest-first so e.g. FRIDA_LIBDIR_NAME is protected whole rather than
 # leaving a dangling _NAME after FRIDA_LIBDIR matches first.
@@ -151,6 +161,16 @@ def rename_text_in_tree(root: Path) -> int:
         except (UnicodeDecodeError, OSError):
             continue
         new_text = protect_and_replace(text)
+        if path.suffix == ".vala":
+            # The 6 files in EXCLUDE_RELATIVE_FILES keep `namespace Frida`
+            # (see the comment there for why) while every other .vala file
+            # just had its own `namespace Frida` renamed to `namespace
+            # Pengu`. Any of those files that referenced a type/const from
+            # the excluded ones unqualified (e.g. bare `PerfEventAttr`)
+            # would otherwise fail to resolve, since it now lives in a
+            # different namespace. `using Frida;` restores that visibility
+            # everywhere; an unused using directive is harmless in Vala.
+            new_text = "using Frida;\n" + new_text
         if new_text != text:
             path.write_text(new_text, encoding="utf-8")
             n = sum(text.count(old) for old, _ in REPLACEMENTS)
