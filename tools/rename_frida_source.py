@@ -26,6 +26,17 @@ PROTECTED_TOKENS = [
     "FRIDA_AGENT_NAME",
     "FRIDA_COMPILER_BACKEND_NAME",
     "HAVE_FRIDA_GLIB",
+    # lib/agent/meson.build passes a hardcoded linker flag,
+    # -Wl,-exported_symbol,_frida_agent_main, restricting the agent
+    # dylib to exporting exactly that one symbol. Renaming the actual
+    # function/cname to pengu_agent_main (as the general substitution
+    # would) leaves nothing satisfying that linker flag, so the link
+    # fails with "Undefined symbols ... _frida_agent_main". Fully fixing
+    # this would mean also editing that meson.build linker flag (a
+    # plain string, not a subproject/dependency name, so it would be
+    # safe to touch) and agent.vala's own cname - not done here, so this
+    # one symbol simply keeps its original name everywhere.
+    "frida_agent_main",
     # Static headers referenced by their literal on-disk filename from
     # meson.build (files(...)) and/or .vapi (cheader_filename = "..."):
     # this script doesn't rename filenames, only file content, so any
