@@ -2,7 +2,6 @@
 
 Follow [FRIDA](https://github.com/frida/frida) upstream to automatic patch and build an anti-detection version of frida-server for android.
 
-**Hint: Don't fork this repository**
 
 ## Download
 
