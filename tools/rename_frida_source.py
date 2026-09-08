@@ -160,9 +160,16 @@ def qualify_bare_excluded_vapi_symbols(text: str) -> str:
 # such file in frida-core was checked by hand and contains only
 # frida-prefixed symbol names/wildcards or comments - no filename or
 # subproject coupling - so blanket content substitution is safe here.
+#
+# .resources files ARE included too: they're resource-compiler manifests
+# (e.g. src/icons.resources: "[resource-compiler]\nnamespace = Frida.Data.Icons")
+# whose namespace= line must match whatever the actual .vala source now
+# refers to (Frida.Data.Icons -> Pengu.Data.Icons) after renaming - same
+# reasoning as the linker files above, and every such file was checked by
+# hand to contain only that one namespace= line, no path/subproject coupling.
 SOURCE_SUFFIXES = {
     ".vala", ".vapi", ".c", ".h", ".cpp", ".cc", ".hpp", ".m", ".mm", ".java",
-    ".version", ".symbols", ".def",
+    ".version", ".symbols", ".def", ".resources",
 }
 EXTRA_EXACT_NAMES = {"Makefile"}
 
@@ -179,6 +186,23 @@ EXCLUDE_DIR_NAMES = {".git", "releng", "deps", "build", "toolchain"}
 # These files are pure C interop plumbing with no runtime-visible
 # strings of their own, so excluding them entirely is both safe and low
 # value to rename in the first place.
+#
+# Their backing C headers need the same exclusion, for the same reason -
+# frida-linux.vapi/frida-atomics.vapi/darwin-gcd.vapi/darwin-xpc.vapi bind
+# to C symbols in these headers using implicit Vala naming (a cprefix, or
+# no cname at all), so the header's typedef/enum/#define/function names
+# must keep matching the vapi's un-renamed "Frida" namespace exactly. This
+# bit both ways in practice: PerfEventAttr's cname is derived from `Frida`
+# by frida-linux.vapi and expected as "FridaPerfEventAttr", but
+# frida-linux-perf-event.h (not excluded before this fix) got its own
+# typedef renamed to "PenguPerfEventAttr" - a straight content mismatch,
+# same failure mode as the meson.build literals above, just one layer
+# removed (a static header instead of a build-system literal). Not every
+# static header needs this: frida-jni.h/frida-tvos.h contain no
+# Frida-prefixed C symbols (only an include guard, harmless either way),
+# and frida-selinux.h/frida-helper-*-glue.h back NON-excluded vala files
+# that get renamed in lockstep with them, so only headers backing an
+# EXCLUDED vapi's implicit-naming members are listed here.
 EXCLUDE_RELATIVE_FILES = {
     "lib/base/frida-linux.vapi",
     "lib/base/frida-atomics.vapi",
@@ -186,6 +210,10 @@ EXCLUDE_RELATIVE_FILES = {
     "vapi/darwin-xpc.vapi",
     "vapi/jni.vapi",
     "lib/payload/libc-shim.vapi",
+    "lib/base/frida-atomics.h",
+    "lib/base/frida-darwin.h",
+    "lib/base/frida-linux-bpf.h",
+    "lib/base/frida-linux-perf-event.h",
 }
 
 
