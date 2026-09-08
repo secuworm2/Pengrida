@@ -207,6 +207,9 @@ jobs:
         grep -rn '"main"' src/linux/linux-host-session.vala src/agent-container.vala
         cd ../..
 
+        echo "Renaming Frida identifiers to Pengu throughout frida-core source"
+        python3 ../tools/rename_frida_source.py subprojects/frida-core
+
         cd ..
 
         ARCHES="android-arm64"
@@ -359,6 +362,10 @@ jobs:
         sed -i '' 's/"frida_agent_main"/"main"/' tests/test-agent.vala
         sed -i '' 's/"frida_agent_main"/"main"/' tests/test-injector.vala
         cd ../..
+
+        echo "Renaming Frida identifiers to Pengu throughout frida-core source"
+        python3 ../tools/rename_frida_source.py subprojects/frida-core
+
         cd ..
 
         for ARCH in arm64
