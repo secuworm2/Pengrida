@@ -115,12 +115,15 @@ def protect_and_replace(text: str) -> str:
 # failure mode - a file that never mentions PerfEventAttr etc. is left
 # completely alone.
 #
-# dlopen/dlclose/dlsym/dlerror/MAP_ANONYMOUS are deliberately left out:
-# they're common enough names that blindly qualifying every bare mention
-# risks redirecting some unrelated reference onto this specific binding.
-# The other frida-linux.vapi members, plus the Atomics/LibcShim
-# sub-namespace names, are unique enough that a bare mention anywhere is
-# almost certainly this file's declaration.
+# dlopen/dlclose/dlsym/dlerror/MAP_ANONYMOUS were initially left out on
+# the theory that they're common enough names that blindly qualifying
+# every bare mention risks redirecting some unrelated reference onto this
+# specific binding. In practice src/linux/frida-helper-backend.vala and
+# proc-mem-injector.vala do call them bare, and nothing else in the tree
+# provides a competing implicit binding, so the exclusion just broke the
+# Android build ("The name `dlopen' does not exist in the context of
+# `Pengu.InjectSession.bootstrap'") - moved them into the qualified list
+# alongside the rest of frida-linux.vapi's members.
 _EXCLUDED_VAPI_BARE_SYMBOLS = [
     # lib/base/frida-linux.vapi (direct members of `namespace Frida`)
     "BpfRingbufFlags",
@@ -129,6 +132,11 @@ _EXCLUDED_VAPI_BARE_SYMBOLS = [
     "PERF_EVENT_COUNT_SW_CPU_CLOCK",
     "PerfEventAttr",
     "PerfEventType",
+    "dlopen",
+    "dlclose",
+    "dlsym",
+    "dlerror",
+    "MAP_ANONYMOUS",
     # lib/base/frida-atomics.vapi (`namespace Frida.Atomics`) - the
     # sub-namespace name itself is the bare identifier at risk, e.g.
     # `Atomics.load_u64_acquire(...)` used inside lib/base/linux.vala.

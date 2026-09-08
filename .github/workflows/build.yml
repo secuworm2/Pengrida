@@ -373,10 +373,8 @@ jobs:
           mkdir build-ios-$ARCH
           cd build-ios-$ARCH
           ../frida/configure --prefix=/usr --host=ios-$ARCH -- \
-              -Dfrida-gum:devkits=gum,gumjs \
               -Dfrida-core:compiler_backend=enabled \
-              -Dfrida-core:assets=installed \
-              -Dfrida-core:devkits=core
+              -Dfrida-core:assets=installed
           make
           DESTDIR="$(pwd)/install" make install
           cd ..
