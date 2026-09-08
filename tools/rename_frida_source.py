@@ -26,6 +26,20 @@ PROTECTED_TOKENS = [
     "FRIDA_AGENT_NAME",
     "FRIDA_COMPILER_BACKEND_NAME",
     "HAVE_FRIDA_GLIB",
+    # Static headers referenced by their literal on-disk filename from
+    # meson.build (files(...)) and/or .vapi (cheader_filename = "..."):
+    # this script doesn't rename filenames, only file content, so any
+    # #include/cheader_filename spelling of these must stay unchanged
+    # too or the compiler can't find the (still frida-*-named) file.
+    "frida-atomics.h",
+    "frida-darwin.h",
+    "frida-jni.h",
+    "frida-linux-bpf.h",
+    "frida-linux-perf-event.h",
+    "frida-tvos.h",
+    "frida-selinux.h",
+    "frida-helper-service-glue.h",
+    "frida-helper-process-glue.h",
 ]
 # Longest-first so e.g. FRIDA_LIBDIR_NAME is protected whole rather than
 # leaving a dangling _NAME after FRIDA_LIBDIR matches first.
@@ -57,14 +71,40 @@ def protect_and_replace(text: str) -> str:
 # that must keep matching the actual on-disk directory names, which this
 # script does NOT rename. Renaming those identifiers without also renaming
 # directories would break meson's subproject resolution.
-SOURCE_SUFFIXES = {".vala", ".c", ".h", ".cpp", ".cc", ".hpp", ".m", ".mm", ".java"}
+SOURCE_SUFFIXES = {".vala", ".vapi", ".c", ".h", ".cpp", ".cc", ".hpp", ".m", ".mm", ".java"}
 EXTRA_EXACT_NAMES = {"Makefile"}
 
 EXCLUDE_DIR_NAMES = {".git", "releng", "deps", "build", "toolchain"}
 
 
-def should_process(path: Path) -> bool:
+# Thin .vapi bindings straight onto static, un-renamed headers
+# (frida-linux-bpf.h, frida-atomics.h, frida-darwin.h, frida-jni.h, ...).
+# Most of their consts/enums have no explicit cname/cprefix, so Vala
+# derives the expected C symbol name from the enclosing `namespace Frida`
+# by convention - renaming that namespace would silently break every
+# such implicit binding (e.g. BPF_RINGBUF_HEADER_SIZE would start
+# looking for PENGU_BPF_RINGBUF_HEADER_SIZE, which doesn't exist).
+# These files are pure C interop plumbing with no runtime-visible
+# strings of their own, so excluding them entirely is both safe and low
+# value to rename in the first place.
+EXCLUDE_RELATIVE_FILES = {
+    "lib/base/frida-linux.vapi",
+    "lib/base/frida-atomics.vapi",
+    "vapi/darwin-gcd.vapi",
+    "vapi/darwin-xpc.vapi",
+    "vapi/jni.vapi",
+    "lib/payload/libc-shim.vapi",
+}
+
+
+def should_process(path: Path, core_root: Path) -> bool:
     if any(part in EXCLUDE_DIR_NAMES for part in path.parts):
+        return False
+    try:
+        rel = path.relative_to(core_root).as_posix()
+    except ValueError:
+        rel = path.as_posix()
+    if rel in EXCLUDE_RELATIVE_FILES:
         return False
     if path.suffix in SOURCE_SUFFIXES:
         return True
@@ -89,7 +129,7 @@ def rename_text_in_tree(root: Path) -> int:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if not should_process(path):
+        if not should_process(path, root):
             continue
         try:
             text = path.read_text(encoding="utf-8")
