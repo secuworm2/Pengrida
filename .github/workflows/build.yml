@@ -210,6 +210,33 @@ jobs:
         echo "Renaming Frida identifiers to Pengu throughout frida-core source"
         python3 ../tools/rename_frida_source.py subprojects/frida-core
 
+        echo "Rebuilding android-helper's helper.dex from the renamed Java sources"
+        echo "(it's a prebuilt/checked-in file that meson reads as-is, so renaming"
+        echo "the .java package alone leaves the embedded dex still saying re/frida/*,"
+        echo "which is what re/pengu/HelperBackend's JNI find_class lookup then misses)"
+        ANDROID_SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+        ANDROID_JAR=$(ls "$ANDROID_SDK"/platforms/*/android.jar | sort -V | tail -1)
+        D8=$(ls "$ANDROID_SDK"/build-tools/*/d8 | sort -V | tail -1)
+        echo "ANDROID_SDK=$ANDROID_SDK"
+        echo "ANDROID_JAR=$ANDROID_JAR"
+        echo "D8=$D8"
+        (
+          cd subprojects/frida-core/src/android-helper
+          rm -rf build
+          mkdir -p build/java
+          javac -cp ".:$ANDROID_JAR" -bootclasspath "$ANDROID_JAR" -source 1.8 -target 1.8 \
+              -Xlint:deprecation -Xlint:unchecked \
+              re/pengu/Helper.java re/pengu/HelperBackend.java \
+              -d build/java/
+          jar cfe build/frida-helper.jar re.pengu.Helper -C build/java/ .
+          "$D8" --classpath "$ANDROID_JAR" --output build/ build/frida-helper.jar
+          mv build/classes.dex helper.dex
+        )
+        echo "Rebuilt helper.dex:"
+        ls -la subprojects/frida-core/src/android-helper/helper.dex
+        strings subprojects/frida-core/src/android-helper/helper.dex | grep -c "re/frida" || true
+        strings subprojects/frida-core/src/android-helper/helper.dex | grep "re/pengu" | head -5
+
         cd ..
 
         ARCHES="android-arm64"
