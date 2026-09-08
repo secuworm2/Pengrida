@@ -90,6 +90,45 @@ def protect_and_replace(text: str) -> str:
 
     return text
 
+
+# Of the 6 excluded files, only lib/base/frida-linux.vapi declares things
+# directly under bare `namespace Frida { ... }` (frida-atomics.vapi and
+# libc-shim.vapi nest under Frida.Atomics / Frida.LibcShim, and jni.vapi
+# uses its own unrelated `namespace JNI`). Its 11 public members are the
+# only ones at risk of an unqualified reference elsewhere breaking once
+# that reference's own file is renamed out of namespace Frida.
+#
+# A blanket `using Frida;` in every renamed .vala file was tried and
+# reverted: it breaks any compilation unit that doesn't itself pull in
+# frida-linux.vapi (e.g. tools/resource-compiler.vala), since Vala's
+# `using` directive requires the named namespace to actually resolve to
+# something in that unit's own dependency graph. Qualifying only the
+# specific bare references that exist is more code but doesn't have that
+# failure mode - a file that never mentions PerfEventAttr etc. is left
+# completely alone.
+#
+# dlopen/dlclose/dlsym/dlerror/MAP_ANONYMOUS are deliberately left out:
+# they're common enough names that blindly qualifying every bare mention
+# risks redirecting some unrelated reference onto this specific binding.
+# The ones kept are unique enough (BPF/perf-event specific) that a bare
+# mention anywhere is almost certainly this file's declaration.
+_FRIDA_LINUX_VAPI_SYMBOLS = [
+    "BpfRingbufFlags",
+    "BPF_RINGBUF_HEADER_SIZE",
+    "PERF_EVENT_TYPE_SOFTWARE",
+    "PERF_EVENT_COUNT_SW_CPU_CLOCK",
+    "PerfEventAttr",
+    "PerfEventType",
+]
+_BARE_SYMBOL_RE = re.compile(
+    r"(?<![.\w])(" + "|".join(_FRIDA_LINUX_VAPI_SYMBOLS) + r")\b"
+)
+
+
+def qualify_bare_frida_linux_symbols(text: str) -> str:
+    return _BARE_SYMBOL_RE.sub(lambda m: "Frida." + m.group(1), text)
+
+
 # Only real source files get text-substituted. meson.build / meson_options.txt /
 # .wrap files are deliberately excluded: they reference subproject and
 # dependency names (e.g. subproject('frida-gum'), dependency('frida-gum-1.0'))
@@ -162,15 +201,7 @@ def rename_text_in_tree(root: Path) -> int:
             continue
         new_text = protect_and_replace(text)
         if path.suffix == ".vala":
-            # The 6 files in EXCLUDE_RELATIVE_FILES keep `namespace Frida`
-            # (see the comment there for why) while every other .vala file
-            # just had its own `namespace Frida` renamed to `namespace
-            # Pengu`. Any of those files that referenced a type/const from
-            # the excluded ones unqualified (e.g. bare `PerfEventAttr`)
-            # would otherwise fail to resolve, since it now lives in a
-            # different namespace. `using Frida;` restores that visibility
-            # everywhere; an unused using directive is harmless in Vala.
-            new_text = "using Frida;\n" + new_text
+            new_text = qualify_bare_frida_linux_symbols(new_text)
         if new_text != text:
             path.write_text(new_text, encoding="utf-8")
             n = sum(text.count(old) for old, _ in REPLACEMENTS)
