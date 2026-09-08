@@ -85,6 +85,28 @@ PROTECTED_TOKENS = [
     "get_frida_agent_arm_so_blob",
     "get_frida_agent_arm64_so_blob",
     "get_frida_compiler_backend_so_blob",
+    # src/linux/helpers/zymbiote.c is compiled ahead of time into prebuilt
+    # per-arch artifacts (src/linux/helpers/artifacts/native/*/zymbiote.elf,
+    # checked into git - rebuilding them requires per-arch Docker containers
+    # via helpers/rebuild.sh, not something this build does). At runtime,
+    # src/linux/linux-host-session.vala loads that blob and:
+    #   - matches its two exported symbol names literally
+    #     (e.name == "frida_zymbiote_replacement_setargv0"/"...setcontext")
+    #     to locate injection points - if the string doesn't match the
+    #     blob's real (unrenamed) export names, the lookup silently
+    #     resolves to 0 ("assertion failed: (setargv0 != 0)");
+    #   - locates a fixed-length placeholder baked into the blob
+    #     (zymbiote.c: `.socket_path = "/frida-zymbiote-000...0"`) via
+    #     memmem() so it can patch in a real per-instance socket name at
+    #     the same offset - the *generated* name (also built from the
+    #     literal "/frida-zymbiote-" prefix, so the lengths match) has to
+    #     use the identical unrenamed prefix too, or memmem() finds
+    #     nothing to patch.
+    # Both need to keep matching the prebuilt blob's real bytes regardless
+    # of what "frida" is renamed to everywhere else.
+    "frida_zymbiote_replacement_setargv0",
+    "frida_zymbiote_replacement_setcontext",
+    "/frida-zymbiote-",
 ]
 # Longest-first so e.g. FRIDA_LIBDIR_NAME is protected whole rather than
 # leaving a dangling _NAME after FRIDA_LIBDIR matches first.
