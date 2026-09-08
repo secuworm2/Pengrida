@@ -138,15 +138,23 @@ jobs:
 
     - name: build frida for Android
       shell: bash
+      env:
+        FRIDA_VERSION: ${{ needs.check_version.outputs.FRIDA_VERSION }}
       run: |
         git config --global user.name "GitHub Actions"
         git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        
+
         export ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}
         echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
-        
+
         git clone --recurse-submodules https://github.com/frida/frida
         cd frida
+        echo "Pinning to frida release tag $FRIDA_VERSION (clone defaults to the"
+        echo "moving main branch, which is typically ahead in -dev pre-release"
+        echo "territory - a server built from that reports a version the"
+        echo "released frida-tools/frida-ps client's compat check then rejects)"
+        git checkout "$FRIDA_VERSION"
+        git submodule update --init --recursive
         for path in ../patches/*
         do
           name=$(basename $path)
@@ -326,12 +334,19 @@ jobs:
       shell: bash
       env:
         IOS_CERTID: "-"
+        FRIDA_VERSION: ${{ needs.check_version.outputs.FRIDA_VERSION }}
       run: |
         git config --global user.name "GitHub Actions"
         git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
         git clone --recurse-submodules https://github.com/frida/frida
         cd frida
+        echo "Pinning to frida release tag $FRIDA_VERSION (clone defaults to the"
+        echo "moving main branch, which is typically ahead in -dev pre-release"
+        echo "territory - a server built from that reports a version the"
+        echo "released frida-tools/frida-ps client's compat check then rejects)"
+        git checkout "$FRIDA_VERSION"
+        git submodule update --init --recursive
         for path in ../patches/*
         do
           name=$(basename $path)
