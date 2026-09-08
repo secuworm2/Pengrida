@@ -91,12 +91,20 @@ def protect_and_replace(text: str) -> str:
     return text
 
 
-# Of the 6 excluded files, only lib/base/frida-linux.vapi declares things
-# directly under bare `namespace Frida { ... }` (frida-atomics.vapi and
-# libc-shim.vapi nest under Frida.Atomics / Frida.LibcShim, and jni.vapi
-# uses its own unrelated `namespace JNI`). Its 11 public members are the
-# only ones at risk of an unqualified reference elsewhere breaking once
-# that reference's own file is renamed out of namespace Frida.
+# Of the 6 excluded files, only frida-linux.vapi, frida-atomics.vapi and
+# libc-shim.vapi live under the `Frida` namespace tree (darwin-gcd.vapi and
+# darwin-xpc.vapi declare their own unrelated `namespace Darwin.*`, and
+# jni.vapi uses bare `namespace JNI`) - only those three have members at
+# risk of an unqualified reference elsewhere breaking once that reference's
+# own file is renamed out of namespace Frida:
+#   - frida-linux.vapi declares its 11 members directly under `Frida`
+#     (dlopen/MAP_ANONYMOUS/BpfRingbufFlags/PerfEventAttr/...)
+#   - frida-atomics.vapi nests them under the sub-namespace `Frida.Atomics`
+#   - libc-shim.vapi nests them under the sub-namespace `Frida.LibcShim`
+# Either way, a bare mention of the member name (frida-linux.vapi) or of
+# the sub-namespace name itself (Atomics./LibcShim.) needs "Frida." (or
+# "Frida.Atomics."/"Frida.LibcShim.") prepended once its own file no longer
+# sits inside `namespace Frida`.
 #
 # A blanket `using Frida;` in every renamed .vala file was tried and
 # reverted: it breaks any compilation unit that doesn't itself pull in
@@ -110,22 +118,31 @@ def protect_and_replace(text: str) -> str:
 # dlopen/dlclose/dlsym/dlerror/MAP_ANONYMOUS are deliberately left out:
 # they're common enough names that blindly qualifying every bare mention
 # risks redirecting some unrelated reference onto this specific binding.
-# The ones kept are unique enough (BPF/perf-event specific) that a bare
-# mention anywhere is almost certainly this file's declaration.
-_FRIDA_LINUX_VAPI_SYMBOLS = [
+# The other frida-linux.vapi members, plus the Atomics/LibcShim
+# sub-namespace names, are unique enough that a bare mention anywhere is
+# almost certainly this file's declaration.
+_EXCLUDED_VAPI_BARE_SYMBOLS = [
+    # lib/base/frida-linux.vapi (direct members of `namespace Frida`)
     "BpfRingbufFlags",
     "BPF_RINGBUF_HEADER_SIZE",
     "PERF_EVENT_TYPE_SOFTWARE",
     "PERF_EVENT_COUNT_SW_CPU_CLOCK",
     "PerfEventAttr",
     "PerfEventType",
+    # lib/base/frida-atomics.vapi (`namespace Frida.Atomics`) - the
+    # sub-namespace name itself is the bare identifier at risk, e.g.
+    # `Atomics.load_u64_acquire(...)` used inside lib/base/linux.vala.
+    "Atomics",
+    # lib/payload/libc-shim.vapi (`namespace Frida.LibcShim`) - same
+    # pattern as Atomics above.
+    "LibcShim",
 ]
 _BARE_SYMBOL_RE = re.compile(
-    r"(?<![.\w])(" + "|".join(_FRIDA_LINUX_VAPI_SYMBOLS) + r")\b"
+    r"(?<![.\w])(" + "|".join(_EXCLUDED_VAPI_BARE_SYMBOLS) + r")\b"
 )
 
 
-def qualify_bare_frida_linux_symbols(text: str) -> str:
+def qualify_bare_excluded_vapi_symbols(text: str) -> str:
     return _BARE_SYMBOL_RE.sub(lambda m: "Frida." + m.group(1), text)
 
 
@@ -199,32 +216,58 @@ def rename_java_package_dir(core_root: Path):
         print(f"[*] no android-helper java package dir at {old_dir}, skipping move")
 
 
-# lib/agent/meson.build hardcodes the darwin link flag
-# -Wl,-exported_symbol,_frida_agent_main as a plain string literal (not a
-# subproject/dependency name), restricting the agent dylib to exporting
-# exactly that one symbol. meson.build files are otherwise excluded from
-# the general substitution (to avoid breaking subproject()/dependency()
-# name resolution elsewhere in the tree), so this one known literal is
-# patched directly instead. It must track whatever agent.vala's
-# `namespace Frida.Agent { public void main(...) }` implicitly compiles
-# to once "Frida" is renamed - i.e. pengu_agent_main.
-_AGENT_MESON_BUILD_RELATIVE = "lib/agent/meson.build"
-_AGENT_EXPORTED_SYMBOL_OLD = "_frida_agent_main"
-_AGENT_EXPORTED_SYMBOL_NEW = "_pengu_agent_main"
+# lib/agent/meson.build and lib/gadget/meson.build hardcode a handful of
+# C symbol names as plain string literals (not subproject/dependency
+# names): the darwin -Wl,-exported_symbol,... link flag, and the
+# --move constructor/destructor operations passed to modulate.py to
+# reorder the agent/gadget's static-init and static-deinit functions.
+# meson.build files are otherwise excluded from the general substitution
+# (to avoid breaking subproject()/dependency() name resolution elsewhere
+# in the tree), so these known literals are patched directly instead. Each
+# must track whatever the corresponding Vala/C symbol implicitly compiles
+# to once "frida" is renamed to "pengu" everywhere else:
+#   - frida_agent_main:       namespace Frida.Agent { public void main }
+#   - frida_libc_shim_init/deinit, frida_on_load/frida_on_unload:
+#                              literal C function names in
+#                              lib/agent/agent-glue.c and
+#                              lib/gadget/gadget-glue.c (already renamed
+#                              by the general substitution since those are
+#                              plain .c files, not meson.build)
+# This is inherently a whack-a-mole list: any future frida-core meson.build
+# change that hardcodes a new C symbol name this way needs a new entry
+# here, the same way a new implicit Vala namespace-derived symbol needs a
+# new PROTECTED_TOKENS/qualify entry above.
+_MESON_BUILD_LITERAL_PATCHES = [
+    ("lib/agent/meson.build", [
+        ("_frida_agent_main", "_pengu_agent_main"),
+        ("'frida_libc_shim_init'", "'pengu_libc_shim_init'"),
+        ("'frida_libc_shim_deinit'", "'pengu_libc_shim_deinit'"),
+    ]),
+    ("lib/gadget/meson.build", [
+        ("'frida_libc_shim_init'", "'pengu_libc_shim_init'"),
+        ("'frida_libc_shim_deinit'", "'pengu_libc_shim_deinit'"),
+        ("'frida_on_load'", "'pengu_on_load'"),
+        ("'frida_on_unload'", "'pengu_on_unload'"),
+    ]),
+]
 
 
-def patch_agent_meson_build(core_root: Path):
-    path = core_root / _AGENT_MESON_BUILD_RELATIVE
-    if not path.is_file():
-        print(f"[*] no {_AGENT_MESON_BUILD_RELATIVE}, skipping exported-symbol patch")
-        return
-    text = path.read_text(encoding="utf-8")
-    if _AGENT_EXPORTED_SYMBOL_OLD not in text:
-        print(f"[*] {_AGENT_MESON_BUILD_RELATIVE}: '{_AGENT_EXPORTED_SYMBOL_OLD}' not found, skipping")
-        return
-    new_text = text.replace(_AGENT_EXPORTED_SYMBOL_OLD, _AGENT_EXPORTED_SYMBOL_NEW)
-    path.write_text(new_text, encoding="utf-8")
-    print(f"[*] {path}: exported_symbol {_AGENT_EXPORTED_SYMBOL_OLD} -> {_AGENT_EXPORTED_SYMBOL_NEW}")
+def patch_meson_build_literals(core_root: Path):
+    for relative, replacements in _MESON_BUILD_LITERAL_PATCHES:
+        path = core_root / relative
+        if not path.is_file():
+            print(f"[*] no {relative}, skipping literal-symbol patch")
+            continue
+        text = path.read_text(encoding="utf-8")
+        new_text = text
+        for old, new in replacements:
+            if old not in new_text:
+                print(f"[*] {relative}: '{old}' not found, skipping")
+                continue
+            new_text = new_text.replace(old, new)
+            print(f"[*] {relative}: {old} -> {new}")
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
 
 
 def rename_text_in_tree(root: Path) -> int:
@@ -240,7 +283,7 @@ def rename_text_in_tree(root: Path) -> int:
             continue
         new_text = protect_and_replace(text)
         if path.suffix == ".vala":
-            new_text = qualify_bare_frida_linux_symbols(new_text)
+            new_text = qualify_bare_excluded_vapi_symbols(new_text)
         if new_text != text:
             path.write_text(new_text, encoding="utf-8")
             n = sum(text.count(old) for old, _ in REPLACEMENTS)
@@ -260,7 +303,7 @@ def main(argv):
         return 1
 
     rename_java_package_dir(core_root)
-    patch_agent_meson_build(core_root)
+    patch_meson_build_literals(core_root)
     total = rename_text_in_tree(core_root)
     print(f"[*] total replacements: {total}")
     return 0
