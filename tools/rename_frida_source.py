@@ -147,19 +147,25 @@ _EXCLUDED_VAPI_BARE_SYMBOLS = [
 ]
 # src/linux/frida-helper-backend.vala's HelperLibcApi struct has fields
 # literally named `dlopen`/`dlclose`/`dlsym`/`dlerror` (holding resolved
-# function-pointer addresses, mirroring the real libc functions by name).
-# A field DECLARATION site (`void * dlopen;`) is textually indistinguishable
-# from a bare word-boundary match, but qualifying it produces `void *
+# function-pointer addresses, mirroring the real libc functions by name):
+#     void * dlopen;
+#     void * dlclose;
+#     ...
+# A field DECLARATION site is textually indistinguishable in general from
+# a bare word-boundary match, but qualifying it produces `void *
 # Frida.dlopen;`, which isn't a legal field name and breaks parsing so
 # badly the rest of the class reads as garbage ("inner `enum' types are
-# not supported in `HelperLibcApi'", cascading for 20+ lines). Every
-# legitimate bare USAGE of these symbols in the tree is followed by `,`,
-# `)`, or another operator/token before any `;` ever appears - only the
-# field declarations have the symbol immediately (whitespace only)
-# followed by `;` - so excluding that one shape disambiguates them without
-# needing a real parser.
+# not supported in `HelperLibcApi'", cascading for 20+ lines). A first
+# attempt excluded any match immediately followed by `;`, on the theory
+# that every legitimate bare USAGE is followed by `,` or `)` first - but
+# PERF_EVENT_COUNT_SW_CPU_CLOCK is also assigned as a bare statement-final
+# value (`pea.config = PERF_EVENT_COUNT_SW_CPU_CLOCK;`), which that
+# accidentally excluded too, un-fixing the exact bug this list exists to
+# fix. The declaration site is uniquely identified by what PRECEDES it
+# instead - `void * ` - which a legitimate value/call usage never is, so
+# excluding on that shape is safe rather than guessing from what follows.
 _BARE_SYMBOL_RE = re.compile(
-    r"(?<![.\w])(" + "|".join(_EXCLUDED_VAPI_BARE_SYMBOLS) + r")\b(?!\s*;)"
+    r"(?<![.\w])(?<!void \* )(" + "|".join(_EXCLUDED_VAPI_BARE_SYMBOLS) + r")\b"
 )
 
 
@@ -290,14 +296,26 @@ def rename_java_package_dir(core_root: Path):
 #     the hardcoded "frida_" makes the search always fail, crashing with
 #     "AttributeError: 'NoneType' object has no attribute 'group'" instead
 #     of quietly producing a wrong prototype the way finditer()-based scans
-#     elsewhere in the same file do. This is the only crash-causing spot
-#     found so far; everything else in generate.py builds a devkit
-#     (frida-core.h/-1.0.vapi/Frida-1.0.gir under src/api/) that nothing in
-#     this build actually reads (tools/package-server-fruity-pengrida.sh
-#     only takes usr/bin/frida-server and usr/lib/frida-1.0/frida-agent.dylib
-#     from the install DESTDIR), so a devkit that's internally
-#     inconsistent about "Frida" vs "Pengu" naming but doesn't crash is an
-#     acceptable outcome, not something worth chasing further.
+#     elsewhere in the same file do.
+#   - Same script's ApiEnum and ApiObjectType classes both do
+#     `self.c_name = 'Frida' + name` to derive the expected C type name.
+#     Every regex keyed off object_type.c_name/enum.c_name (there are
+#     several, e.g. the `typedef enum ... FridaXxx;` lookup in all_headers)
+#     then fails identically for every single type/enum, since the header
+#     now says "PenguXxx" - not just one crash but every c_definition
+#     staying None, surfacing later as "TypeError: can only concatenate
+#     str (not 'NoneType') to str" the first time one gets written out.
+#     Patching this one `'Frida' + name` literal (used identically in both
+#     classes) fixes every one of those downstream lookups at once, rather
+#     than chasing each regex that depends on it individually.
+#   These two are the crash-causing spots found so far; everything else in
+#   generate.py builds a devkit (frida-core.h/-1.0.vapi/Frida-1.0.gir under
+#   src/api/) that nothing in this build actually reads
+#   (tools/package-server-fruity-pengrida.sh only takes usr/bin/frida-server
+#   and usr/lib/frida-1.0/frida-agent.dylib from the install DESTDIR), so a
+#   devkit that's internally inconsistent about "Frida" vs "Pengu" naming
+#   but doesn't crash is an acceptable outcome, not something worth chasing
+#   further.
 # This is inherently a whack-a-mole list: any future frida-core change that
 # hardcodes a new C symbol/identifier name this way needs a new entry here,
 # the same way a new implicit Vala namespace-derived symbol needs a new
@@ -316,6 +334,7 @@ _LITERAL_PATCHES = [
     ]),
     ("src/api/generate.py", [
         (' frida_{}.+?;".format(f.name)', ' pengu_{}.+?;".format(f.name)'),
+        ("self.c_name = 'Frida' + name", "self.c_name = 'Pengu' + name"),
     ]),
 ]
 
