@@ -65,6 +65,26 @@ PROTECTED_TOKENS = [
     "frida-helper-backend.h",
     "frida-netif.h",
     "frida-tests.h",
+    # tools/resource-compiler.vala names each embedded blob's accessor
+    # function "<cprefix-from-.resources-namespace>_get_<identifier-from-
+    # input-filename>_blob", where the namespace half tracks our rename
+    # (helper.resources' "Frida.Data.Helper" -> "Pengu.Data.Helper", already
+    # renamed normally) but the identifier half is built from the literal
+    # on-disk artifact filename hardcoded in src/embed-helper.py
+    # ("frida-helper-32"/"frida-helper-64", themselves matching an
+    # unrenamed meson.build variable) - which .py isn't renamed. So the
+    # real generated C symbol keeps "frida" in the identifier half while
+    # gaining "pengu" in the namespace half, and the bare Vala call site
+    # (get_frida_helper_32_blob(), relying on implicit namespace-derived
+    # naming, exactly like every other implicit-naming case in this file)
+    # must keep spelling it that way too, or the two stop matching.
+    "get_frida_helper_32_blob",
+    "get_frida_helper_64_blob",
+    "get_frida_agent_32_so_blob",
+    "get_frida_agent_64_so_blob",
+    "get_frida_agent_arm_so_blob",
+    "get_frida_agent_arm64_so_blob",
+    "get_frida_compiler_backend_so_blob",
 ]
 # Longest-first so e.g. FRIDA_LIBDIR_NAME is protected whole rather than
 # leaving a dangling _NAME after FRIDA_LIBDIR matches first.
