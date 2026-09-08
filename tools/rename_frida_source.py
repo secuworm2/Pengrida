@@ -145,8 +145,21 @@ _EXCLUDED_VAPI_BARE_SYMBOLS = [
     # pattern as Atomics above.
     "LibcShim",
 ]
+# src/linux/frida-helper-backend.vala's HelperLibcApi struct has fields
+# literally named `dlopen`/`dlclose`/`dlsym`/`dlerror` (holding resolved
+# function-pointer addresses, mirroring the real libc functions by name).
+# A field DECLARATION site (`void * dlopen;`) is textually indistinguishable
+# from a bare word-boundary match, but qualifying it produces `void *
+# Frida.dlopen;`, which isn't a legal field name and breaks parsing so
+# badly the rest of the class reads as garbage ("inner `enum' types are
+# not supported in `HelperLibcApi'", cascading for 20+ lines). Every
+# legitimate bare USAGE of these symbols in the tree is followed by `,`,
+# `)`, or another operator/token before any `;` ever appears - only the
+# field declarations have the symbol immediately (whitespace only)
+# followed by `;` - so excluding that one shape disambiguates them without
+# needing a real parser.
 _BARE_SYMBOL_RE = re.compile(
-    r"(?<![.\w])(" + "|".join(_EXCLUDED_VAPI_BARE_SYMBOLS) + r")\b"
+    r"(?<![.\w])(" + "|".join(_EXCLUDED_VAPI_BARE_SYMBOLS) + r")\b(?!\s*;)"
 )
 
 
@@ -252,28 +265,44 @@ def rename_java_package_dir(core_root: Path):
         print(f"[*] no android-helper java package dir at {old_dir}, skipping move")
 
 
-# lib/agent/meson.build and lib/gadget/meson.build hardcode a handful of
-# C symbol names as plain string literals (not subproject/dependency
-# names): the darwin -Wl,-exported_symbol,... link flag, and the
-# --move constructor/destructor operations passed to modulate.py to
-# reorder the agent/gadget's static-init and static-deinit functions.
-# meson.build files are otherwise excluded from the general substitution
-# (to avoid breaking subproject()/dependency() name resolution elsewhere
-# in the tree), so these known literals are patched directly instead. Each
-# must track whatever the corresponding Vala/C symbol implicitly compiles
-# to once "frida" is renamed to "pengu" everywhere else:
-#   - frida_agent_main:       namespace Frida.Agent { public void main }
-#   - frida_libc_shim_init/deinit, frida_on_load/frida_on_unload:
-#                              literal C function names in
-#                              lib/agent/agent-glue.c and
-#                              lib/gadget/gadget-glue.c (already renamed
-#                              by the general substitution since those are
-#                              plain .c files, not meson.build)
-# This is inherently a whack-a-mole list: any future frida-core meson.build
-# change that hardcodes a new C symbol name this way needs a new entry
-# here, the same way a new implicit Vala namespace-derived symbol needs a
-# new PROTECTED_TOKENS/qualify entry above.
-_MESON_BUILD_LITERAL_PATCHES = [
+# A handful of files are excluded from the general substitution (meson.build,
+# to avoid breaking subproject()/dependency() name resolution; src/api/
+# generate.py, because it hardcodes the "Frida" brand so pervasively - output
+# filenames meson.build's own custom_target() expects verbatim, an input
+# filename ("frida.vala") it reads directly, C-name reconstruction assuming
+# every type is literally "Frida" + name, GIR/vapi namespace text, etc - that
+# blanket substitution would create as many new mismatches as it fixed. But
+# each still hardcodes a handful of literal C symbol/identifier names that
+# DO need to track the frida->pengu rename applied everywhere else, so those
+# specific literals are patched directly instead:
+#   - lib/agent/meson.build's darwin -Wl,-exported_symbol,... link flag and
+#     lib/agent+lib/gadget/meson.build's --move constructor/destructor
+#     operations passed to modulate.py must match the literal C function
+#     names in lib/agent/agent-glue.c and lib/gadget/gadget-glue.c (already
+#     renamed normally, being plain .c files):
+#       frida_agent_main:       namespace Frida.Agent { public void main }
+#       frida_libc_shim_init/deinit, frida_on_load/frida_on_unload
+#   - src/api/generate.py's parse_api() does
+#     `re.search(r"...frida_{}...".format(f.name), all_headers)` to find
+#     each public Vala function's C prototype inside the (renamed)
+#     frida-core.h/frida-base.h text it's given, then unconditionally calls
+#     `.group(0)` on the result. Since the header now says "pengu_<name>",
+#     the hardcoded "frida_" makes the search always fail, crashing with
+#     "AttributeError: 'NoneType' object has no attribute 'group'" instead
+#     of quietly producing a wrong prototype the way finditer()-based scans
+#     elsewhere in the same file do. This is the only crash-causing spot
+#     found so far; everything else in generate.py builds a devkit
+#     (frida-core.h/-1.0.vapi/Frida-1.0.gir under src/api/) that nothing in
+#     this build actually reads (tools/package-server-fruity-pengrida.sh
+#     only takes usr/bin/frida-server and usr/lib/frida-1.0/frida-agent.dylib
+#     from the install DESTDIR), so a devkit that's internally
+#     inconsistent about "Frida" vs "Pengu" naming but doesn't crash is an
+#     acceptable outcome, not something worth chasing further.
+# This is inherently a whack-a-mole list: any future frida-core change that
+# hardcodes a new C symbol/identifier name this way needs a new entry here,
+# the same way a new implicit Vala namespace-derived symbol needs a new
+# PROTECTED_TOKENS/qualify entry above.
+_LITERAL_PATCHES = [
     ("lib/agent/meson.build", [
         ("_frida_agent_main", "_pengu_agent_main"),
         ("'frida_libc_shim_init'", "'pengu_libc_shim_init'"),
@@ -285,11 +314,14 @@ _MESON_BUILD_LITERAL_PATCHES = [
         ("'frida_on_load'", "'pengu_on_load'"),
         ("'frida_on_unload'", "'pengu_on_unload'"),
     ]),
+    ("src/api/generate.py", [
+        (' frida_{}.+?;".format(f.name)', ' pengu_{}.+?;".format(f.name)'),
+    ]),
 ]
 
 
-def patch_meson_build_literals(core_root: Path):
-    for relative, replacements in _MESON_BUILD_LITERAL_PATCHES:
+def patch_known_literals(core_root: Path):
+    for relative, replacements in _LITERAL_PATCHES:
         path = core_root / relative
         if not path.is_file():
             print(f"[*] no {relative}, skipping literal-symbol patch")
@@ -339,7 +371,7 @@ def main(argv):
         return 1
 
     rename_java_package_dir(core_root)
-    patch_meson_build_literals(core_root)
+    patch_known_literals(core_root)
     total = rename_text_in_tree(core_root)
     print(f"[*] total replacements: {total}")
     return 0
