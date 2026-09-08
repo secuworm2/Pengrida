@@ -107,6 +107,49 @@ PROTECTED_TOKENS = [
     "frida_zymbiote_replacement_setargv0",
     "frida_zymbiote_replacement_setcontext",
     "/frida-zymbiote-",
+    # lib/base/session.vala's [DBus (name = "re.frida.HostSession17")] and
+    # `public const string HOST_SESSION = "/re/frida/HostSession";`-style
+    # declarations aren't internal naming - they're the wire-protocol
+    # contract a stock, unmodified frida client (frida-tools/frida-python,
+    # which this build does not touch or rebuild) uses to find the right
+    # D-Bus interface/object path on connect. Renaming them broke every
+    # client interaction outright: the server and its own --version both
+    # correctly reported the pinned 17.17.0, yet `frida-ps` still failed
+    # with "unable to communicate with remote frida-server" because it was
+    # asking for interface "re.frida.HostSession17" and the renamed server
+    # only exposed "re.pengu.HostSession17" - a hard protocol mismatch, not
+    # a version one. Unlike every other identifier in this file, these
+    # must stay exactly as upstream Frida defines them for interop with
+    # anything speaking the standard protocol. (frida-helper's own
+    # "re.frida.Helper" D-Bus interface is NOT included here: it's a
+    # private IPC channel between frida-server and frida-helper, both
+    # built fresh from this same renamed source, so renaming it in lockstep
+    # is safe and has no compatibility impact.)
+    "re.frida.HostSession17",
+    "re.frida.AgentSessionProvider17",
+    "re.frida.AgentSession17",
+    "re.frida.AgentController17",
+    "re.frida.AgentMessageSink17",
+    "re.frida.GadgetSession17",
+    "re.frida.Channel17",
+    "re.frida.ServiceSession17",
+    "re.frida.TransportBroker17",
+    "re.frida.PortalSession17",
+    "re.frida.BusSession17",
+    "re.frida.AuthenticationService17",
+    "re.frida.Error",
+    "/re/frida/HostSession",
+    "/re/frida/AgentSessionProvider",
+    "/re/frida/AgentSession",
+    "/re/frida/AgentController",
+    "/re/frida/AgentMessageSink",
+    "/re/frida/GadgetSession",
+    "/re/frida/Channel",
+    "/re/frida/Service",
+    "/re/frida/TransportBroker",
+    "/re/frida/PortalSession",
+    "/re/frida/BusSession",
+    "/re/frida/AuthenticationService",
 ]
 # Longest-first so e.g. FRIDA_LIBDIR_NAME is protected whole rather than
 # leaving a dangling _NAME after FRIDA_LIBDIR matches first.
