@@ -26,17 +26,6 @@ PROTECTED_TOKENS = [
     "FRIDA_AGENT_NAME",
     "FRIDA_COMPILER_BACKEND_NAME",
     "HAVE_FRIDA_GLIB",
-    # lib/agent/meson.build passes a hardcoded linker flag,
-    # -Wl,-exported_symbol,_frida_agent_main, restricting the agent
-    # dylib to exporting exactly that one symbol. Renaming the actual
-    # function/cname to pengu_agent_main (as the general substitution
-    # would) leaves nothing satisfying that linker flag, so the link
-    # fails with "Undefined symbols ... _frida_agent_main". Fully fixing
-    # this would mean also editing that meson.build linker flag (a
-    # plain string, not a subproject/dependency name, so it would be
-    # safe to touch) and agent.vala's own cname - not done here, so this
-    # one symbol simply keeps its original name everywhere.
-    "frida_agent_main",
     # Static headers referenced by their literal on-disk filename from
     # meson.build (files(...)) and/or .vapi (cheader_filename = "..."):
     # this script doesn't rename filenames, only file content, so any
@@ -146,7 +135,18 @@ def qualify_bare_frida_linux_symbols(text: str) -> str:
 # that must keep matching the actual on-disk directory names, which this
 # script does NOT rename. Renaming those identifiers without also renaming
 # directories would break meson's subproject resolution.
-SOURCE_SUFFIXES = {".vala", ".vapi", ".c", ".h", ".cpp", ".cc", ".hpp", ".m", ".mm", ".java"}
+#
+# .version/.symbols/.def files ARE included: they're linker version-scripts
+# and export lists (e.g. lib/agent/frida-agent-android.version lists
+# "frida_agent_main" as the sole global export) that must name the exact C
+# symbol the corresponding Vala source now compiles to after renaming. Every
+# such file in frida-core was checked by hand and contains only
+# frida-prefixed symbol names/wildcards or comments - no filename or
+# subproject coupling - so blanket content substitution is safe here.
+SOURCE_SUFFIXES = {
+    ".vala", ".vapi", ".c", ".h", ".cpp", ".cc", ".hpp", ".m", ".mm", ".java",
+    ".version", ".symbols", ".def",
+}
 EXTRA_EXACT_NAMES = {"Makefile"}
 
 EXCLUDE_DIR_NAMES = {".git", "releng", "deps", "build", "toolchain"}
@@ -199,6 +199,34 @@ def rename_java_package_dir(core_root: Path):
         print(f"[*] no android-helper java package dir at {old_dir}, skipping move")
 
 
+# lib/agent/meson.build hardcodes the darwin link flag
+# -Wl,-exported_symbol,_frida_agent_main as a plain string literal (not a
+# subproject/dependency name), restricting the agent dylib to exporting
+# exactly that one symbol. meson.build files are otherwise excluded from
+# the general substitution (to avoid breaking subproject()/dependency()
+# name resolution elsewhere in the tree), so this one known literal is
+# patched directly instead. It must track whatever agent.vala's
+# `namespace Frida.Agent { public void main(...) }` implicitly compiles
+# to once "Frida" is renamed - i.e. pengu_agent_main.
+_AGENT_MESON_BUILD_RELATIVE = "lib/agent/meson.build"
+_AGENT_EXPORTED_SYMBOL_OLD = "_frida_agent_main"
+_AGENT_EXPORTED_SYMBOL_NEW = "_pengu_agent_main"
+
+
+def patch_agent_meson_build(core_root: Path):
+    path = core_root / _AGENT_MESON_BUILD_RELATIVE
+    if not path.is_file():
+        print(f"[*] no {_AGENT_MESON_BUILD_RELATIVE}, skipping exported-symbol patch")
+        return
+    text = path.read_text(encoding="utf-8")
+    if _AGENT_EXPORTED_SYMBOL_OLD not in text:
+        print(f"[*] {_AGENT_MESON_BUILD_RELATIVE}: '{_AGENT_EXPORTED_SYMBOL_OLD}' not found, skipping")
+        return
+    new_text = text.replace(_AGENT_EXPORTED_SYMBOL_OLD, _AGENT_EXPORTED_SYMBOL_NEW)
+    path.write_text(new_text, encoding="utf-8")
+    print(f"[*] {path}: exported_symbol {_AGENT_EXPORTED_SYMBOL_OLD} -> {_AGENT_EXPORTED_SYMBOL_NEW}")
+
+
 def rename_text_in_tree(root: Path) -> int:
     total = 0
     for path in root.rglob("*"):
@@ -232,6 +260,7 @@ def main(argv):
         return 1
 
     rename_java_package_dir(core_root)
+    patch_agent_meson_build(core_root)
     total = rename_text_in_tree(core_root)
     print(f"[*] total replacements: {total}")
     return 0
