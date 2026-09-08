@@ -194,9 +194,19 @@ def qualify_bare_excluded_vapi_symbols(text: str) -> str:
 # refers to (Frida.Data.Icons -> Pengu.Data.Icons) after renaming - same
 # reasoning as the linker files above, and every such file was checked by
 # hand to contain only that one namespace= line, no path/subproject coupling.
+#
+# .S included too: lib/payload/syscall-linux-*.S each start with their own
+# #define frida_asm_align/frida_asm_custom_entry/frida_asm_function_type,
+# consumed by a macro in the (renamed, being a .h) lib/payload/
+# syscall-linux.h - leaving the .S file unrenamed meant the header expected
+# "pengu_asm_align" while only "frida_asm_align" was ever defined, so the
+# preprocessor left it unexpanded and the assembler saw literal garbage
+# ("expected absolute expression", "unrecognized instruction mnemonic").
+# All 5 files were checked by hand: same family, no filename coupling
+# beyond what meson.build (already excluded) references by literal name.
 SOURCE_SUFFIXES = {
     ".vala", ".vapi", ".c", ".h", ".cpp", ".cc", ".hpp", ".m", ".mm", ".java",
-    ".version", ".symbols", ".def", ".resources",
+    ".version", ".symbols", ".def", ".resources", ".S",
 }
 EXTRA_EXACT_NAMES = {"Makefile"}
 
