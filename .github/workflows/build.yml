@@ -254,9 +254,11 @@ jobs:
     - name: package build result for Android
       shell: bash
       run: |
-        
-        gzip build-android-arm64/subprojects/frida-core/server/frida-server
-        gzip build-android-arm64/subprojects/frida-core/lib/gadget/frida-gadget.so
+        cp build-android-arm64/subprojects/frida-core/server/frida-server build-android-arm64/subprojects/frida-core/server/pengrida-server
+        cp build-android-arm64/subprojects/frida-core/lib/gadget/frida-gadget.so build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-gadget.so
+
+        gzip build-android-arm64/subprojects/frida-core/server/pengrida-server
+        gzip build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-gadget.so
 
     - name: Upload android arm64 frida-server for Pengrida
       uses: actions/upload-release-asset@v1.0.2
@@ -264,7 +266,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
-        asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/server/frida-server.gz'
+        asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/server/pengrida-server.gz'
         asset_name: 'pengrida-server-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.gz'
         asset_content_type: application/octet-stream
 
@@ -274,7 +276,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
-        asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/lib/gadget/frida-gadget.so.gz'
+        asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-gadget.so.gz'
         asset_name: 'pengrida-gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.so.gz'
         asset_content_type: application/octet-stream
 
@@ -382,7 +384,7 @@ jobs:
         mkdir -p release-assets
         for ARCH in arm64
         do
-          bash frida/subprojects/frida-core/tools/package-server-fruity.sh \
+          bash tools/package-server-fruity-pengrida.sh \
               "iphoneos-$ARCH" \
               "build-ios-$ARCH/install" \
               "release-assets/pengrida_${FRIDA_VERSION}_iphoneos-$ARCH.deb"
