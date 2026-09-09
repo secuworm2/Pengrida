@@ -1,0 +1,43 @@
+From 5129a035c5265791d0f4061f19b793d9a5dbb528 Mon Sep 17 00:00:00 2001
+From: GitHub Actions <41898282+github-actions[bot]@users.noreply.github.com>
+Date: Wed, 9 Sep 2026 22:56:17 +0900
+Subject: [PATCH] Pengrida: art_thread_count_cloaker_skip
+
+Skip installing ThreadCountCloaker's GetOsThreadStat/read hooks.
+On apps with many threads (multiple bundled SDKs, WebView sandboxes,
+etc.) the per-call query_num_uncloaked_threads() /proc/self/task
+rescan these hooks do contends with frida-core's own "wait until
+single-threaded" polling during Java bridge attach, and the two
+sides never converge inside Android's 5s ANR window - the app's
+main thread stalls and gets killed before a script ever loads.
+Disabling this thread-count cloak trades a smaller/weaker anti-
+detection property (an observer could in principle notice frida's
+own thread count) for the app surviving attach at all.
+---
+ lib/payload/cloak.vala | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/lib/payload/cloak.vala b/lib/payload/cloak.vala
+index 4eba038..4059f5d 100644
+--- a/lib/payload/cloak.vala
++++ b/lib/payload/cloak.vala
+@@ -59,6 +59,16 @@ namespace Frida {
+ 		private delegate ssize_t ReadFunc (int fd, void * buf, size_t count);
+ 
+ 		construct {
++			// Pengrida: skip installing the GetOsThreadStat/read hooks used to hide our
++			// own cloaked threads from thread-count queries. On thread-heavy apps, the
++			// query_num_uncloaked_threads() directory rescan these hooks trigger on every
++			// call collides with frida-core's own "wait until single-threaded" polling
++			// during Java bridge attach, and the two never converge quickly enough -
++			// stalling the app's main thread past Android's ANR watchdog. Losing this
++			// thread-count cloaking is a smaller cost than the process being killed.
++			if (true)
++				return;
++
+ 			var art = Gum.Process.find_module_by_name ("libart.so");
+ 			if (art != null) {
+ 				art.enumerate_imports (imp => {
+-- 
+2.37.3.windows.1
+

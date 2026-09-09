@@ -9,6 +9,7 @@ on:
     paths:
       - ".github/workflows/build.yml"
       - "patches/**"
+      - "patches-art/**"
 
 jobs: 
   check_version:
@@ -320,6 +321,223 @@ jobs:
         upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-gadget.so.gz'
         asset_name: 'pengrida-gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.so.gz'
+        asset_content_type: application/octet-stream
+
+  # Separate job, isolated build tree, from-scratch clone of frida - does not touch
+  # android_build's checkout, artifacts or upload steps in any way. Applies every
+  # patch android_build applies (same patches/frida-core, patches/frida-gum, rename,
+  # helper.dex rebuild) PLUS the extra patches-art/frida-core/* patches on top, then
+  # uploads only a gadget, under its own asset name, so android_build's
+  # pengrida-server-*.gz / pengrida-gadget-*.so.gz outputs are byte-for-byte
+  # unaffected by anything below.
+  android_art_build:
+    runs-on: ubuntu-22.04
+    needs: [check_version, create_release]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - uses: actions/setup-node@v3
+      with:
+        node-version: 18
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        distribution: "temurin"
+        java-version: "17"
+
+    - name: Setup Android NDK
+      id: setup-ndk
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r29
+        local-cache: false
+        link-to-sdk: true
+
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+
+    - name: install dependencies
+      run: |
+        sudo apt-get update && DEBIAN_FRONTEND=noninteractive sudo apt-get install build-essential tree ninja-build gcc-multilib g++-multilib lib32stdc++-9-dev flex bison ruby ruby-dev python3-requests python3-setuptools python3-dev python3-pip libc6-dev libc6-dev-i386 -y
+        sudo gem install fpm -v 1.11.0 --no-document
+        python3 -m pip install lief graphlib
+
+    - name: build ART-patched frida for Android
+      shell: bash
+      env:
+        FRIDA_VERSION: ${{ needs.check_version.outputs.FRIDA_VERSION }}
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        export ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}
+        echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
+
+        git clone --recurse-submodules https://github.com/frida/frida
+        cd frida
+        echo "Pinning to frida release tag $FRIDA_VERSION (clone defaults to the"
+        echo "moving main branch, which is typically ahead in -dev pre-release"
+        echo "territory - a server built from that reports a version the"
+        echo "released frida-tools/frida-ps client's compat check then rejects)"
+        git checkout "$FRIDA_VERSION"
+        git submodule update --init --recursive
+        for path in ../patches/*
+        do
+          name=$(basename $path)
+          real=$(realpath $path)
+          echo "Apply patches in $real to frida/subprojects/$name"
+          cd subprojects/$name
+          for patchfile in ../../../patches/$name/*.patch
+          do
+            echo "Applying $patchfile"
+            if ! git am --3way "$patchfile"; then
+              echo "Patch failed, aborting this patch and continuing"
+              git am --abort
+            fi
+          done
+          cd ../..
+          echo $i
+        done
+
+        echo "Applying additional ART-compatibility patches on top (patches-art/*)"
+        echo "these are NOT part of android_build's patch set - they only apply here"
+        for path in ../patches-art/*
+        do
+          name=$(basename $path)
+          real=$(realpath $path)
+          echo "Apply patches in $real to frida/subprojects/$name"
+          cd subprojects/$name
+          for patchfile in ../../../patches-art/$name/*.patch
+          do
+            echo "Applying $patchfile"
+            if ! git am --3way "$patchfile"; then
+              echo "Patch failed, aborting this patch and continuing"
+              git am --abort
+            fi
+          done
+          cd ../..
+        done
+
+        echo "Manually re-applying symbol_frida_agent_main (patch 0003 fails to apply upstream but its content still applies cleanly by hand)"
+        cd subprojects/frida-core
+        cat > src/anti-anti-frida.py << 'PYEOF'
+        import lief
+        import sys
+        import random
+        import os
+
+        if __name__ == "__main__":
+            input_file = sys.argv[1]
+            print(f"[*] Patch frida-agent: {input_file}")
+            random_name = "".join(random.sample("ABCDEFGHIJKLMNO", 5))
+            print(f"[*] Patch `frida` to `{random_name}``")
+
+            binary = lief.parse(input_file)
+
+            if not binary:
+                exit()
+
+            for symbol in binary.symbols:
+                if symbol.name == "frida_agent_main":
+                    symbol.name = "main"
+
+                if "frida" in symbol.name:
+                    symbol.name = symbol.name.replace("frida", random_name)
+
+                if "FRIDA" in symbol.name:
+                    symbol.name = symbol.name.replace("FRIDA", random_name)
+
+            binary.write(input_file)
+        PYEOF
+        cd ../..
+
+        echo "Renaming Frida identifiers to Pengu throughout frida-core source"
+        python3 ../tools/rename_frida_source.py subprojects/frida-core
+
+        echo "Rebuilding android-helper's helper.dex from the renamed Java sources"
+        ANDROID_SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+        ANDROID_JAR=$(ls "$ANDROID_SDK"/platforms/*/android.jar | sort -V | tail -1)
+        D8=$(ls "$ANDROID_SDK"/build-tools/*/d8 | sort -V | tail -1)
+        echo "ANDROID_SDK=$ANDROID_SDK"
+        echo "ANDROID_JAR=$ANDROID_JAR"
+        echo "D8=$D8"
+        (
+          cd subprojects/frida-core/src/android-helper
+          rm -rf build
+          mkdir -p build/java
+          javac -cp ".:$ANDROID_JAR" -bootclasspath "$ANDROID_JAR" -source 1.8 -target 1.8 \
+              -Xlint:deprecation -Xlint:unchecked \
+              re/pengu/Helper.java re/pengu/HelperBackend.java \
+              -d build/java/
+          jar cfe build/frida-helper.jar re.pengu.Helper -C build/java/ .
+          "$D8" --classpath "$ANDROID_JAR" --output build/ build/frida-helper.jar
+          mv build/classes.dex helper.dex
+        )
+        echo "Rebuilt helper.dex:"
+        ls -la subprojects/frida-core/src/android-helper/helper.dex
+
+        cd ..
+
+        ARCHES="android-arm64"
+        for ARCH in $ARCHES
+        do
+          mkdir build-$ARCH
+          cd build-$ARCH
+          ../frida/configure --host=$ARCH
+          make
+          cd ..
+        done
+
+    - name: Split Repository Name
+      id: split_name
+      run: |
+        repo_name=${{ github.repository }}
+        IFS='/' read -ra repo_parts <<< "$repo_name"
+        echo "owner=${repo_parts[0]}" >> $GITHUB_OUTPUT
+        echo "repo=${repo_parts[1]}" >> $GITHUB_OUTPUT
+
+    - name: Check release version
+      id: checkReleaseVersion
+      uses: actions/github-script@v3
+      with:
+        github-token: ${{secrets.GITHUB_TOKEN}}
+        script: |
+          try {
+            const releaseVersion = '${{ needs.check_version.outputs.FRIDA_VERSION }}'
+            const releaseResponse = await github.repos.getReleaseByTag({
+              owner: '${{ steps.split_name.outputs.owner }}',
+              repo: '${{ steps.split_name.outputs.repo }}',
+              tag: releaseVersion
+            })
+            const {
+              data: { id: releaseId, html_url: htmlUrl, upload_url: uploadUrl }
+            } = releaseResponse;
+            core.setOutput('id', releaseId);
+            core.setOutput('html_url', htmlUrl);
+            core.setOutput('upload_url', uploadUrl);
+            core.setOutput('version', releaseVersion);
+          } catch (e) {
+            core.setFailed(e.message);
+          }
+
+    - name: package ART-patched gadget for Android
+      shell: bash
+      run: |
+        cp build-android-arm64/subprojects/frida-core/lib/gadget/frida-gadget.so build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so
+        gzip build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so
+
+    - name: Upload android arm64 ART-patched frida-gadget for Pengrida
+      uses: actions/upload-release-asset@v1.0.2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so.gz'
+        asset_name: 'pengrida-art_gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.so.gz'
         asset_content_type: application/octet-stream
 
   ios_build:
