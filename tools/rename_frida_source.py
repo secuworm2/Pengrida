@@ -150,6 +150,49 @@ PROTECTED_TOKENS = [
     "/re/frida/PortalSession",
     "/re/frida/BusSession",
     "/re/frida/AuthenticationService",
+    # src/linux/helpers/inject-context.h defines the struct/enum layout
+    # shared between the now-excluded nolibc payloads (bootstrapper.c,
+    # loader.c - kept byte-for-byte upstream, see EXCLUDE_RELATIVE_FILES)
+    # and normal, renamed glue code that also needs to reference the exact
+    # same types to talk to them (src/linux/frida-helper-backend-types.c,
+    # frida-helper-backend.vala). inject-context.h itself is NOT excluded
+    # (nothing stops it from being read normally by non-excluded files),
+    # but is one of the "static header backing an excluded file" cases
+    # like frida-atomics.h etc. above - except here the roles are
+    # reversed: it's the CONSUMERS outside the excluded family that must
+    # keep spelling these types the unrenamed way, since the excluded
+    # bootstrapper.c/loader.c already do. Confirmed necessary at
+    # build time: frida-helper-backend-types.c failed with "use of
+    # undeclared identifier 'PenguBootstrapContext'" etc once
+    # inject-context.h's consumers started renaming their own references
+    # to it while bootstrapper.c/loader.c (excluded) kept the originals.
+    "FridaBootstrapStatus",
+    "FridaBootstrapContext",
+    "FridaLoaderContext",
+    "FridaLibcApi",
+    "FridaMessageType",
+    "FridaHelloMessage",
+    "FridaByeMessage",
+    "FridaRtldFlavor",
+    "FRIDA_BOOTSTRAP_ALLOCATION_SUCCESS",
+    "FRIDA_BOOTSTRAP_ALLOCATION_ERROR",
+    "FRIDA_BOOTSTRAP_SUCCESS",
+    "FRIDA_BOOTSTRAP_AUXV_NOT_FOUND",
+    "FRIDA_BOOTSTRAP_TOO_EARLY",
+    "FRIDA_BOOTSTRAP_LIBC_LOAD_ERROR",
+    "FRIDA_BOOTSTRAP_LIBC_UNSUPPORTED",
+    "FRIDA_MESSAGE_HELLO",
+    "FRIDA_MESSAGE_READY",
+    "FRIDA_MESSAGE_ACK",
+    "FRIDA_MESSAGE_BYE",
+    "FRIDA_MESSAGE_ERROR_DLOPEN",
+    "FRIDA_MESSAGE_ERROR_DLSYM",
+    "FRIDA_RTLD_UNKNOWN",
+    "FRIDA_RTLD_NONE",
+    "FRIDA_RTLD_GLIBC",
+    "FRIDA_RTLD_UCLIBC",
+    "FRIDA_RTLD_MUSL",
+    "FRIDA_RTLD_ANDROID",
 ]
 # Longest-first so e.g. FRIDA_LIBDIR_NAME is protected whole rather than
 # leaving a dangling _NAME after FRIDA_LIBDIR matches first.
