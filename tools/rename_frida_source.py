@@ -336,6 +336,32 @@ EXCLUDE_RELATIVE_FILES = {
     "lib/base/frida-darwin.h",
     "lib/base/frida-linux-bpf.h",
     "lib/base/frida-linux-perf-event.h",
+    # src/linux/helpers/zymbiote.c is a freshly-compiled (not prebuilt, for
+    # the android-arm64 target this build produces) freestanding nolibc
+    # payload that gets patched byte-for-byte into a freshly-spawned app's
+    # memory to intercept it before Zygote finishes. Beyond the two export
+    # names and the socket-path placeholder already protected above (needed
+    # because linux-host-session.vala, NOT excluded, must keep referring to
+    # them by their real names), it also has ARM64 inline assembly
+    # (`adrp x16, zymbiote` / `add x16, x16, :lo12:zymbiote`) addressing a
+    # global `ZymbioteContext zymbiote` struct whose many function-pointer
+    # fields (mprotect/socket/connect/sendmsg/recv/...) get filled in by
+    # offset-based patching from the server side, not by name - a lot of
+    # surface area for a subtle renaming-induced regression to hide in,
+    # and exactly this class of bug: on-device testing showed
+    # `frida -Uf <package>` spawning cleanly with stock frida-server but
+    # silently hanging (app killed by ActivityManager for "start timeout",
+    # no crash or log output of any kind - unlike the setargv0 assertion
+    # already fixed) with the fully-renamed build, while attaching to an
+    # already-running process fails identically on both stock and renamed
+    # builds (a device-level SELinux/ptrace restriction, unrelated).
+    # Given this file's entire purpose is a transient, narrowly-scoped
+    # injection payload - not something that stays resident or shows up in
+    # a normal loaded-modules scan the way the agent/gadget do - excluding
+    # it entirely (keeping it byte-for-byte upstream, proven to work) is a
+    # better trade than chasing a specific bug in it via static reading
+    # with no way to attach a debugger to the failure.
+    "src/linux/helpers/zymbiote.c",
 }
 
 
