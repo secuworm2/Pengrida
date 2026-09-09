@@ -193,6 +193,38 @@ PROTECTED_TOKENS = [
     "FRIDA_RTLD_UCLIBC",
     "FRIDA_RTLD_MUSL",
     "FRIDA_RTLD_ANDROID",
+    # lib/selinux/patch.c defines two SELinux type names, "frida_file" and
+    # "frida_memfd", and patches the live kernel policy at server startup
+    # to let ANY domain open/read/execute/mmap files labeled with them -
+    # this is what lets an untrusted_app-domain target process load the
+    # agent .so that frida-server (running as root) hands it, despite
+    # SELinux normally denying cross-domain file access. src/linux/
+    # linjector.vala labels the actual temp file/memfd it creates with
+    # `SELinux.setfilecon(path, "u:object_r:frida_file:s0")` and
+    # `SELinux.fsetfilecon(fd, "u:object_r:frida_memfd:s0")` - both normal,
+    # non-excluded files, so blanket substitution renamed both consistently
+    # to "pengu_file"/"pengu_memfd" and nothing here looked broken from
+    # static reading alone.
+    #
+    # On-device testing (Pixel 6, rooted) found the actual regression this
+    # caused: `frida -Uf <package>` hung with the freshly-spawned app stuck
+    # in recvfrom() waiting for the agent .so file descriptor frida-server
+    # never successfully handed it, while the exact same spawn worked
+    # cleanly with an unmodified stock frida-server. "frida_file"/
+    # "frida_memfd" aren't just frida-core's own internal naming - they're
+    # a long-documented, external convention: many rooted/custom-kernel
+    # Android setups (this device very likely included) bake in a
+    # permanent SELinux allow-rule for these *exact* type names ahead of
+    # time, since frida-core's own runtime policy patch doesn't reliably
+    # succeed on every kernel/policy version. Renaming them means the
+    # freshly-created "pengu_file"/"pengu_memfd" types have no such
+    # pre-existing allowance, so the label either gets rejected or is
+    # simply never permitted for the target's domain - the same class of
+    # "external contract, not internal naming" issue as the D-Bus
+    # interface names above, just at the SELinux layer instead of the
+    # wire-protocol layer.
+    "frida_file",
+    "frida_memfd",
 ]
 # Longest-first so e.g. FRIDA_LIBDIR_NAME is protected whole rather than
 # leaving a dangling _NAME after FRIDA_LIBDIR matches first.
