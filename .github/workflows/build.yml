@@ -222,6 +222,11 @@ jobs:
         echo "Renaming Frida identifiers to Pengu throughout frida-core source"
         python3 ../tools/rename_frida_source.py subprojects/frida-core
 
+        echo "TEMP DIAGNOSTIC: inserting debug prints to trace the spawn hang"
+        echo "(spawn_requests[process_name] vs zymbiote hello.process_name mismatch"
+        echo "theory) - remove this step once root-caused, it's not a real fix"
+        python3 ../tools/debug_insert.py subprojects/frida-core
+
         echo "Rebuilding android-helper's helper.dex from the renamed Java sources"
         echo "(it's a prebuilt/checked-in file that meson reads as-is, so renaming"
         echo "the .java package alone leaves the embedded dex still saying re/frida/*,"
