@@ -362,6 +362,34 @@ EXCLUDE_RELATIVE_FILES = {
     # better trade than chasing a specific bug in it via static reading
     # with no way to attach a debugger to the failure.
     "src/linux/helpers/zymbiote.c",
+    # Follow-up on-device test (spawn hang, see zymbiote.c above): excluding
+    # zymbiote.c alone got further - the SELinux PROCMAP_QUERY denial that
+    # appears (harmlessly) in stock's successful run now appears here too,
+    # instead of nothing at all - but the app still hangs and gets killed
+    # right after, meaning the next stage of the same freestanding nolibc
+    # injection pipeline has the identical class of problem. bootstrapper.c
+    # (+ elf-parser.c/.h it shares with other helpers, syscall.c/.h, and the
+    # inject-context.h layout it depends on) does the post-zymbiote/
+    # post-attach probing (resolving libc/interpreter addresses by parsing
+    # /proc/self/maps or ELF export tables) and loader.c does the actual
+    # agent handshake - both freshly compiled here, both nolibc, freestanding,
+    # entered by fixed offset rather than by name (so renaming their many
+    # internal "frida_"-prefixed static helper functions was never necessary
+    # for anything external to find them), and both exactly as transient and
+    # low-detection-value as zymbiote.c. Rather than bisecting this family
+    # one file at a time across more multi-hour CI+on-device round trips,
+    # excluding the whole thing keeps the tree byte-for-byte upstream at
+    # every stage of native injection that isn't the agent/gadget itself.
+    "src/linux/helpers/bootstrapper.c",
+    "src/linux/helpers/elf-parser.c",
+    "src/linux/helpers/elf-parser.h",
+    "src/linux/helpers/inject-context.h",
+    "src/linux/helpers/loader.c",
+    "src/linux/helpers/syscall.c",
+    "src/linux/helpers/syscall.h",
+    "src/linux/helpers/activity-sampler.bpf.c",
+    "src/linux/helpers/spawn-gater.bpf.c",
+    "src/linux/helpers/syscall-tracer.bpf.c",
 }
 
 
