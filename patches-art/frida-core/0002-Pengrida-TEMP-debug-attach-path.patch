@@ -1,0 +1,132 @@
+From 21f71c8a83646151260d11d6010f2e2f5e393082 Mon Sep 17 00:00:00 2001
+From: secuworm2 <secuworm@gmail.com>
+Date: Wed, 9 Sep 2026 23:23:59 +0900
+Subject: [PATCH] Pengrida TEMP: instrument the attach path with timestamped
+ logs
+
+Diagnostic only - traces connection setup, Runner.open, LiveAgentSession
+construction (ScriptEngine + AgentMessageTransmitter), and native-invader
+child gating (thread cloakers) to find exactly where a plain attach with
+no script stalls the main thread long enough to trigger Android's ANR
+watchdog on this target app. Remove once root-caused.
+---
+ lib/agent/agent.vala                | 13 +++++++++++++
+ lib/payload/base-agent-session.vala | 10 +++++++++-
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/lib/agent/agent.vala b/lib/agent/agent.vala
+index 15b473e..ea99bac 100644
+--- a/lib/agent/agent.vala
++++ b/lib/agent/agent.vala
+@@ -786,6 +786,7 @@ namespace Frida.Agent {
+ 
+ 		private async void open (AgentSessionId id, HashTable<string, Variant> options,
+ 				Cancellable? cancellable) throws Error, IOError {
++			GLib.info ("DEBUG_ATTACH: Runner.open ENTER id=%u", id.handle);
+ 			if (unloading)
+ 				throw new Error.INVALID_OPERATION ("Agent is unloading");
+ 
+@@ -846,7 +847,9 @@ namespace Frida.Agent {
+ 
+ 			MainContext dbus_context = yield get_dbus_context ();
+ 
++			GLib.info ("DEBUG_ATTACH: id=%u about to construct LiveAgentSession (ScriptEngine ctor happens here)", id.handle);
+ 			var session = new LiveAgentSession (this, id, opts.persist_timeout, sink, dbus_context);
++			GLib.info ("DEBUG_ATTACH: id=%u LiveAgentSession constructed", id.handle);
+ 			sessions[id] = session;
+ 			session.closed.connect (on_session_closed);
+ 			session.script_eternalized.connect (on_script_eternalized);
+@@ -858,6 +861,7 @@ namespace Frida.Agent {
+ 				assert_not_reached ();
+ 			}
+ 
++			GLib.info ("DEBUG_ATTACH: id=%u Runner.open EXIT, emitting opened()", id.handle);
+ 			opened (id);
+ 		}
+ 
+@@ -1093,19 +1097,27 @@ namespace Frida.Agent {
+ 			if (spawn_monitor != null)
+ 				return;
+ 
++			GLib.info ("DEBUG_ATTACH: enable_child_gating ENTER");
+ 			var interceptor = Gum.Interceptor.obtain ();
+ 			interceptor.begin_transaction ();
++			GLib.info ("DEBUG_ATTACH: interceptor.begin_transaction done");
+ 
+ 			fork_monitor = new ForkMonitor (this);
+ 			fd_guard = new FileDescriptorGuard (agent_range);
++			GLib.info ("DEBUG_ATTACH: fork_monitor+fd_guard done, constructing cloakers");
+ 
+ 			thread_count_cloaker = new ThreadCountCloaker ();
++			GLib.info ("DEBUG_ATTACH: thread_count_cloaker done");
+ 			thread_list_cloaker = new ThreadListCloaker ();
++			GLib.info ("DEBUG_ATTACH: thread_list_cloaker done");
+ 			fd_list_cloaker = new FDListCloaker ();
++			GLib.info ("DEBUG_ATTACH: fd_list_cloaker done");
+ 
+ 			spawn_monitor = new SpawnMonitor (this, main_context);
++			GLib.info ("DEBUG_ATTACH: spawn_monitor done, ending transaction");
+ 
+ 			interceptor.end_transaction ();
++			GLib.info ("DEBUG_ATTACH: enable_child_gating EXIT");
+ 		}
+ 
+ 		private void disable_child_gating () {
+@@ -1174,6 +1186,7 @@ namespace Frida.Agent {
+ 		}
+ 
+ 		private async void setup_connection_with_transport_uri (string transport_uri) throws Error {
++			GLib.info ("DEBUG_ATTACH: setup_connection_with_transport_uri ENTER uri=[%s]", transport_uri);
+ 			IOStream stream;
+ 			try {
+ 				if (transport_uri.has_prefix ("socket:")) {
+diff --git a/lib/payload/base-agent-session.vala b/lib/payload/base-agent-session.vala
+index 4751538..622e2df 100644
+--- a/lib/payload/base-agent-session.vala
++++ b/lib/payload/base-agent-session.vala
+@@ -42,18 +42,22 @@ namespace Frida {
+ 		private AgentMessageTransmitter transmitter;
+ 
+ 		construct {
++			GLib.info ("DEBUG_ATTACH: BaseAgentSession.construct ENTER id=%u", id.handle);
+ 			assert (invader != null);
+ 			assert (frida_context != null);
+ 			assert (dbus_context != null);
+ 
+ 			script_engine = new ScriptEngine (invader);
++			GLib.info ("DEBUG_ATTACH: id=%u ScriptEngine constructed", id.handle);
+ 			script_engine.message_from_script.connect (on_message_from_script);
+ 			script_engine.message_from_debugger.connect (on_message_from_debugger);
+ 
+ 			transmitter = new AgentMessageTransmitter (this, persist_timeout, frida_context, dbus_context);
++			GLib.info ("DEBUG_ATTACH: id=%u AgentMessageTransmitter constructed", id.handle);
+ 			transmitter.closed.connect (on_transmitter_closed);
+ 			transmitter.new_candidates.connect (on_transmitter_new_candidates);
+ 			transmitter.candidate_gathering_done.connect (on_transmitter_candidate_gathering_done);
++			GLib.info ("DEBUG_ATTACH: id=%u BaseAgentSession.construct EXIT", id.handle);
+ 		}
+ 
+ 		public async void close (Cancellable? cancellable) throws IOError {
+@@ -116,14 +120,18 @@ namespace Frida {
+ 		}
+ 
+ 		public async void enable_child_gating (Cancellable? cancellable) throws Error, IOError {
++			GLib.info ("DEBUG_ATTACH: id=%u BaseAgentSession.enable_child_gating ENTER (RPC-invoked by client)", id.handle);
+ 			check_open ();
+ 
+-			if (child_gating_enabled)
++			if (child_gating_enabled) {
++				GLib.info ("DEBUG_ATTACH: id=%u already enabled, returning", id.handle);
+ 				return;
++			}
+ 
+ 			invader.acquire_child_gating ();
+ 
+ 			child_gating_enabled = true;
++			GLib.info ("DEBUG_ATTACH: id=%u BaseAgentSession.enable_child_gating EXIT", id.handle);
+ 		}
+ 
+ 		public async void disable_child_gating (Cancellable? cancellable) throws Error, IOError {
+-- 
+2.37.3.windows.1
+
