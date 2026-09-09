@@ -204,15 +204,19 @@ jobs:
 
             binary.write(input_file)
         PYEOF
-        sed -i 's/"frida_agent_main"/"main"/' src/agent-container.vala
-        sed -i 's/"frida_agent_main"/"main"/' src/darwin/darwin-host-session.vala
-        sed -i 's/"frida_agent_main"/"main"/' src/freebsd/freebsd-host-session.vala
-        sed -i 's/"frida_agent_main"/"main"/' src/linux/linux-host-session.vala
-        sed -i 's/"frida_agent_main"/"main"/' src/qnx/qnx-host-session.vala
-        sed -i 's/"frida_agent_main"/"main"/g' src/windows/windows-host-session.vala
-        sed -i 's/"frida_agent_main"/"main"/' tests/test-agent.vala
-        sed -i 's/"frida_agent_main"/"main"/' tests/test-injector.vala
-        grep -rn '"main"' src/linux/linux-host-session.vala src/agent-container.vala
+        echo "NOT sed-patching the frida_agent_main lookup strings to \"main\" here:"
+        echo "that hack existed to match anti-anti-frida.py's post-build binary patch"
+        echo "of the SAME name (see above), which only fires when the compiled symbol"
+        echo "is literally frida_agent_main. rename_frida_source.py below already"
+        echo "renames agent.vala's Frida.Agent.main to Pengu.Agent.main (and the"
+        echo "matching meson.build linker flag), so the real compiled symbol is"
+        echo "pengu_agent_main - anti-anti-frida.py's special case no longer matches"
+        echo "it (harmless dead code) and does not touch it further. Leaving these"
+        echo "lookup strings as literal \"frida_agent_main\" lets the blanket rename"
+        echo "below turn them into \"pengu_agent_main\" too, matching the real symbol."
+        echo "Sed-patching them to bare \"main\" here left the lookup permanently"
+        echo "wrong once rename_frida_source.py started renaming the real symbol -"
+        echo "\"Failed to attach: undefined symbol: main\" at inject time."
         cd ../..
 
         echo "Renaming Frida identifiers to Pengu throughout frida-core source"
@@ -395,14 +399,19 @@ jobs:
 
             binary.write(input_file)
         PYEOF
-        sed -i '' 's/"frida_agent_main"/"main"/' src/agent-container.vala
-        sed -i '' 's/"frida_agent_main"/"main"/' src/darwin/darwin-host-session.vala
-        sed -i '' 's/"frida_agent_main"/"main"/' src/freebsd/freebsd-host-session.vala
-        sed -i '' 's/"frida_agent_main"/"main"/' src/linux/linux-host-session.vala
-        sed -i '' 's/"frida_agent_main"/"main"/' src/qnx/qnx-host-session.vala
-        sed -i '' 's/"frida_agent_main"/"main"/g' src/windows/windows-host-session.vala
-        sed -i '' 's/"frida_agent_main"/"main"/' tests/test-agent.vala
-        sed -i '' 's/"frida_agent_main"/"main"/' tests/test-injector.vala
+        echo "NOT sed-patching the frida_agent_main lookup strings to \"main\" here:"
+        echo "that hack existed to match anti-anti-frida.py's post-build binary patch"
+        echo "of the SAME name (see above), which only fires when the compiled symbol"
+        echo "is literally frida_agent_main. rename_frida_source.py below already"
+        echo "renames agent.vala's Frida.Agent.main to Pengu.Agent.main (and the"
+        echo "matching meson.build linker flag), so the real compiled symbol is"
+        echo "pengu_agent_main - anti-anti-frida.py's special case no longer matches"
+        echo "it (harmless dead code) and does not touch it further. Leaving these"
+        echo "lookup strings as literal \"frida_agent_main\" lets the blanket rename"
+        echo "below turn them into \"pengu_agent_main\" too, matching the real symbol."
+        echo "Sed-patching them to bare \"main\" here left the lookup permanently"
+        echo "wrong once rename_frida_source.py started renaming the real symbol -"
+        echo "\"Failed to attach: undefined symbol: main\" at inject time."
         cd ../..
 
         echo "Renaming Frida identifiers to Pengu throughout frida-core source"
