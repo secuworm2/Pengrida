@@ -225,6 +225,31 @@ PROTECTED_TOKENS = [
     # wire-protocol layer.
     "frida_file",
     "frida_memfd",
+    # lib/base/rpc.vala tags every internal RPC message (used for e.g. the
+    # script engine's own "dispose" lifecycle call on script.unload(), see
+    # ScriptInstance.ensure_dispose_called() in lib/payload/script-engine.vala)
+    # with the literal wire-protocol string "frida:rpc":
+    #   .add_string_value ("frida:rpc")                    (building one)
+    #   if (json.index_of ("\"frida:rpc\"") == -1) ...      (fast-path check)
+    #   if (type == null || type != "frida:rpc") ...        (strict check)
+    # This is a normal, non-excluded file, so blanket substitution renamed
+    # all three to "pengu:rpc" - but the *other* end of this exact tag is
+    # frida-gum's own embedded JS runtime (e.g. runtime/core.js's
+    # send(['frida:rpc', id, type, ...])), which our script never touches
+    # (frida-gum is a separate subproject, and even if it were in scope,
+    # .js isn't in SOURCE_SUFFIXES). Root-caused on-device via a minimal
+    # repro (frida-python: create_script -> load -> unload -> create
+    # ANOTHER script fails with "the connection is closed", reproducible
+    # with a trivial no-op script, confirmed absent on stock frida-server)
+    # and confirmed by finding this exact literal: renaming our side's tag
+    # while the JS side keeps sending the original means every internal
+    # RPC frida-core itself initiates (not user rpc.exports calls, which
+    # go through a separate frida-gum-provided mechanism and still work
+    # fine) silently fails to be recognized, eventually tearing down the
+    # session. Same class of bug as the D-Bus interface names and the
+    # frida_file/frida_memfd SELinux types above: an external wire format
+    # both sides must keep spelling identically, not internal naming.
+    "frida:rpc",
 ]
 # Longest-first so e.g. FRIDA_LIBDIR_NAME is protected whole rather than
 # leaving a dangling _NAME after FRIDA_LIBDIR matches first.
