@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 9/12 * * *"
   workflow_dispatch:
+    inputs:
+      frida_version:
+        description: "Pin build to this frida tag instead of the latest release (e.g. 16.5.7). Leave blank for normal behavior."
+        required: false
+        type: string
   push:
     branches: ["main", "ci"]
     paths:
@@ -16,11 +21,17 @@ jobs:
     runs-on: ubuntu-22.04
 
     outputs:
-      FRIDA_VERSION: ${{ steps.pullFridaLatestRelease.outputs.FRIDA_VERSION }}
+      FRIDA_VERSION: ${{ steps.manualVersion.outputs.FRIDA_VERSION || steps.pullFridaLatestRelease.outputs.FRIDA_VERSION }}
       ALREADY_RELEASE: ${{ steps.checkReleaseVersion.outputs.ALREADY_RELEASE }}
     steps:
+      - name: Use manually pinned frida version
+        id: manualVersion
+        if: ${{ github.event.inputs.frida_version != '' }}
+        run: echo "FRIDA_VERSION=${{ github.event.inputs.frida_version }}" >> $GITHUB_OUTPUT
+
       - name: Pull Frida Latest Release
         id: pullFridaLatestRelease
+        if: ${{ github.event.inputs.frida_version == '' }}
         uses: actions/github-script@v3
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
