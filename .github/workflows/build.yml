@@ -463,6 +463,36 @@ jobs:
                     symbol.name = symbol.name.replace("FRIDA", random_name)
 
             binary.write(input_file)
+
+            # Pengrida: rename the well-known gum-js-loop/gmain/gdbus/
+            # pool-spawner thread names post-build, binary-level (sed, same
+            # approach as the frida_/FRIDA_ symbol rename above - these are
+            # GLib/Gum internal thread names, not something the source-level
+            # Frida->Pengu identifier rename touches). This mirrors what
+            # patches/frida-core/0004 and 0005 try to do by patching this
+            # same anti-anti-frida.py file via `git am` - but this job
+            # (like android_build) always overwrites that file wholesale
+            # with this literal heredoc afterwards, silently discarding
+            # whatever those patches added. Doing it here directly instead
+            # of relying on the patch surviving the overwrite.
+            random_gum_js_loop = "".join(random.sample("abcdefghijklmn", 11))
+            print(f"[*] Patch `gum-js-loop` to `{random_gum_js_loop}`")
+            os.system(f"sed -b -i s/gum-js-loop/{random_gum_js_loop}/g {input_file}")
+
+            random_gmain = "".join(random.sample("abcdefghijklmn", 5))
+            print(f"[*] Patch `gmain` to `{random_gmain}`")
+            os.system(f"sed -b -i s/gmain/{random_gmain}/g {input_file}")
+
+            random_gdbus = "".join(random.sample("abcdefghijklmn", 5))
+            print(f"[*] Patch `gdbus` to `{random_gdbus}`")
+            os.system(f"sed -b -i s/gdbus/{random_gdbus}/g {input_file}")
+
+            # "pool-" + 7 chars = 12 chars, matching "pool-spawner" (12 chars)
+            # exactly - sed on a binary file must not change its length, or
+            # every offset after the match shifts and the ELF ends up corrupt.
+            random_pool_spawner = "".join(random.sample("abcdefghijklmn", 7))
+            print(f"[*] Patch `pool-spawner` to `pool-{random_pool_spawner}`")
+            os.system(f"sed -b -i s/pool-spawner/pool-{random_pool_spawner}/g {input_file}")
         PYEOF
         cd ../..
 
