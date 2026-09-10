@@ -583,14 +583,18 @@ jobs:
 
         # frida-gadget's Listen interaction defaults to on_load=wait: the process
         # blocks (main thread included, on this target) until a client connects and
-        # resumes it. On a target with several bundled SDKs already competing for
-        # the main thread at startup, the backlog built up during that wait is
-        # enough to blow past Android's 5s ANR window the moment a client finally
-        # connects and releases it - confirmed on-device: identical ANR with stock
-        # frida-gadget, pengrida-gadget, and this ART-patched gadget with no config
-        # present, gone once on_load is set to resume instead. gadget.vala looks
-        # this up at <gadget-so-path-without-extension>.config, so it must ship
-        # under the exact same stem as the .so above (pengrida-art-gadget).
+        # resumes it - this is deliberate here, it's what lets a script hook
+        # early-executed classes (Application.onCreate, static initializers, etc.)
+        # before the app's own code runs. On a target with several bundled SDKs
+        # already competing for the main thread at startup, this used to blow past
+        # Android's 5s ANR window the moment a client connected and resumed it -
+        # that turned out to be caused by the gadget never actually going through
+        # anti-anti-frida.py's rename (see the step above, fixed 2026-09-10), not
+        # by wait mode itself. Re-verified on-device with the properly-renamed
+        # gadget: wait mode now attaches, resumes and runs Java.perform cleanly,
+        # no ANR. gadget.vala looks this config up at
+        # <gadget-so-path-without-extension>.config, so it must ship under the
+        # exact same stem as the .so above (pengrida-art-gadget).
         cat > build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.config << 'EOF'
         {
           "interaction": {
@@ -598,7 +602,7 @@ jobs:
             "address": "127.0.0.1",
             "port": 27042,
             "on_port_conflict": "fail",
-            "on_load": "resume"
+            "on_load": "wait"
           }
         }
         EOF
