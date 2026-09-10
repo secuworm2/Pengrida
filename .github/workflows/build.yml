@@ -530,6 +530,29 @@ jobs:
         cp build-android-arm64/subprojects/frida-core/lib/gadget/frida-gadget.so build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so
         gzip build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so
 
+        # frida-gadget's Listen interaction defaults to on_load=wait: the process
+        # blocks (main thread included, on this target) until a client connects and
+        # resumes it. On a target with several bundled SDKs already competing for
+        # the main thread at startup, the backlog built up during that wait is
+        # enough to blow past Android's 5s ANR window the moment a client finally
+        # connects and releases it - confirmed on-device: identical ANR with stock
+        # frida-gadget, pengrida-gadget, and this ART-patched gadget with no config
+        # present, gone once on_load is set to resume instead. gadget.vala looks
+        # this up at <gadget-so-path-without-extension>.config, so it must ship
+        # under the exact same stem as the .so above (pengrida-art-gadget).
+        cat > build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.config << 'EOF'
+        {
+          "interaction": {
+            "type": "listen",
+            "address": "127.0.0.1",
+            "port": 27042,
+            "on_port_conflict": "fail",
+            "on_load": "resume"
+          }
+        }
+        EOF
+        gzip build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.config
+
     - name: Upload android arm64 ART-patched frida-gadget for Pengrida
       uses: actions/upload-release-asset@v1.0.2
       env:
@@ -538,6 +561,16 @@ jobs:
         upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so.gz'
         asset_name: 'pengrida-art_gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.so.gz'
+        asset_content_type: application/octet-stream
+
+    - name: Upload android arm64 ART-patched frida-gadget config for Pengrida
+      uses: actions/upload-release-asset@v1.0.2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.config.gz'
+        asset_name: 'pengrida-art_gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.config.gz'
         asset_content_type: application/octet-stream
 
   ios_build:
