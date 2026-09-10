@@ -1,0 +1,78 @@
+From f856df54da266ea918dec54128986f783b4005d5 Mon Sep 17 00:00:00 2001
+From: secuworm2 <secuworm@gmail.com>
+Date: Thu, 10 Sep 2026 15:48:10 +0900
+Subject: [PATCH] Pengrida: no_libc_exit_hook
+
+Don't hook exit/_exit/abort in libc via ExitMonitor on non-Windows.
+The hook itself (an inline trampoline written into libc's own code
+pages) is exactly the kind of libc-tampering signature RASP/anti-
+tamper SDKs scan for, independent of any frida/gum string or symbol
+naming. Losing ExitMonitor's "let scripts flush state before the
+process exits" behavior is a smaller cost than being detected.
+---
+ lib/payload/exit-monitor.vala | 34 ++++++++++++++++++++++------------
+ 1 file changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/lib/payload/exit-monitor.vala b/lib/payload/exit-monitor.vala
+index 36eefbf..0662830 100644
+--- a/lib/payload/exit-monitor.vala
++++ b/lib/payload/exit-monitor.vala
+@@ -27,26 +27,31 @@ namespace Frida {
+ 		}
+ 
+ 		construct {
++#if WINDOWS
+ 			var interceptor = Gum.Interceptor.obtain ();
+-
+ 			unowned Gum.InvocationListener listener = this;
+-
+-#if WINDOWS
+ 			interceptor.attach ((void *) Gum.Process.find_module_by_name ("kernel32.dll").find_export_by_name ("ExitProcess"),
+ 				listener);
+ #else
+-			var libc = Gum.Process.get_libc_module ();
+-			const string[] apis = {
+-				"exit",
+-				"_exit",
+-				"abort",
+-			};
+-			foreach (var symbol in apis) {
+-				interceptor.attach ((void *) libc.find_export_by_name (symbol), listener);
+-			}
++			// Pengrida: don't hook exit/_exit/abort in libc at all - the hook
++			// itself (an inline trampoline written into libc's own code pages)
++			// is exactly the kind of libc-tampering signature RASP/anti-tamper
++			// SDKs scan for, independent of any frida/gum string or symbol
++			// naming. Losing ExitMonitor's "let scripts flush state before the
++			// process exits" behavior is a smaller cost than being detected.
++			// var libc = Gum.Process.get_libc_module ();
++			// const string[] apis = {
++			// 	"exit",
++			// 	"_exit",
++			// 	"abort",
++			// };
++			// foreach (var symbol in apis) {
++			// 	interceptor.attach ((void *) libc.find_export_by_name (symbol), listener);
++			// }
+ #endif
+ 		}
+ 
++#if WINDOWS
+ 		public override void dispose () {
+ 			var interceptor = Gum.Interceptor.obtain ();
+ 
+@@ -54,6 +59,11 @@ namespace Frida {
+ 
+ 			base.dispose ();
+ 		}
++#else
++		public override void dispose () {
++			base.dispose ();
++		}
++#endif
+ 
+ 		private void on_enter (Gum.InvocationContext context) {
+ 			if (context.get_depth () > 0)
+-- 
+2.37.3.windows.1
+

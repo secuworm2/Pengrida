@@ -1,0 +1,65 @@
+From 98fd5ce3d5efe8e8b969efe7d7c68c4142719df9 Mon Sep 17 00:00:00 2001
+From: secuworm2 <secuworm@gmail.com>
+Date: Thu, 10 Sep 2026 15:48:11 +0900
+Subject: [PATCH] Pengrida: no_libc_signal_hook
+
+Don't replace libc's signal()/sigaction() via GumExceptor's POSIX
+backend. Same rationale as the frida-core ExitMonitor patch: the
+replacement is an inline trampoline written into libc's own code
+pages, exactly the kind of libc-tampering signature RASP/anti-tamper
+SDKs scan for. Losing the ability to route target-installed signal
+handlers through Gum's exceptor is a smaller cost than being detected.
+---
+ gum/backend-posix/gumexceptor-posix.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/gum/backend-posix/gumexceptor-posix.c b/gum/backend-posix/gumexceptor-posix.c
+index fdfa50b..4638059 100644
+--- a/gum/backend-posix/gumexceptor-posix.c
++++ b/gum/backend-posix/gumexceptor-posix.c
+@@ -275,6 +275,15 @@ gum_exceptor_backend_attach (GumExceptorBackend * self)
+     gum_original_sigaction (sig, &action, old_handler);
+   }
+ 
++  /* Pengrida: don't replace libc's signal()/sigaction() at all - the
++   * replacement itself (an inline trampoline written into libc's own code
++   * pages) is exactly the kind of libc-tampering signature RASP/anti-tamper
++   * SDKs scan for, independent of any frida/gum string or symbol naming.
++   * Losing the ability to route target-installed signal handlers through
++   * Gum's exceptor is a smaller cost than being detected. */
++  (void) interceptor;
++  (void) options;
++#if 0
+   if (_gum_exceptor_get_mode () == GUM_EXCEPTOR_MODE_FULL)
+   {
+     gum_interceptor_begin_transaction (interceptor);
+@@ -286,6 +295,7 @@ gum_exceptor_backend_attach (GumExceptorBackend * self)
+ 
+     gum_interceptor_end_transaction (interceptor);
+   }
++#endif
+ }
+ 
+ static void
+@@ -294,6 +304,10 @@ gum_exceptor_backend_detach (GumExceptorBackend * self)
+   GumInterceptor * interceptor = self->interceptor;
+   gint i;
+ 
++  /* Pengrida: nothing was ever replaced in gum_exceptor_backend_attach() (see
++   * there), so there's nothing to revert here either. */
++  (void) interceptor;
++#if 0
+   if (_gum_exceptor_get_mode () == GUM_EXCEPTOR_MODE_FULL)
+   {
+     gum_interceptor_begin_transaction (interceptor);
+@@ -303,6 +317,7 @@ gum_exceptor_backend_detach (GumExceptorBackend * self)
+ 
+     gum_interceptor_end_transaction (interceptor);
+   }
++#endif
+ 
+   for (i = 0; i != self->num_old_handlers; i++)
+     gum_exceptor_backend_detach_handler (self, i);
+-- 
+2.37.3.windows.1
+
