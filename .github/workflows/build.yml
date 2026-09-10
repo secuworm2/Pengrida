@@ -569,6 +569,16 @@ jobs:
       shell: bash
       run: |
         cp build-android-arm64/subprojects/frida-core/lib/gadget/frida-gadget.so build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so
+
+        # anti-anti-frida.py (symbol rename + gum-js-loop/gmain/gdbus/
+        # pool-spawner thread rename) only ever runs against frida-agent-*.so
+        # - see patches/frida-core/0010, which wires it into embed-agent.py's
+        # per-agent-flavor loop. frida-gadget.so is a completely separate
+        # build product that loop never touches, so it had never actually
+        # been through any of that renaming. Run it here directly against
+        # the gadget so it gets the same treatment.
+        python3 frida/subprojects/frida-core/src/anti-anti-frida.py build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so
+
         gzip build-android-arm64/subprojects/frida-core/lib/gadget/pengrida-art-gadget.so
 
         # frida-gadget's Listen interaction defaults to on_load=wait: the process
